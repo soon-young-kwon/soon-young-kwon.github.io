@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>가족 발전방</title>
+<style>
+body{margin:0;font-family:-apple-system,"Apple SD Gothic Neo",sans-serif;background:#f3efe6;color:#2a241c}
+.wrap{max-width:480px;margin:0 auto;padding:12px 12px 80px}
+h1{font-size:1.2rem;margin:0 0 8px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.tabs button{border:1px solid #e6dccb;background:#fff;border-radius:999px;padding:8px 12px}
+.tabs button.on{background:#c45c26;color:#fff;border-color:#c45c26}
+.card{background:#fffdf8;border:1px solid #e6dccb;border-radius:14px;padding:12px;margin:8px 0}
+.weather{background:#0d3a58;color:#fff;border-radius:12px;padding:10px 12px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+.cal b{font-size:.7rem;opacity:.6}
+.cal button{border:0;background:#1b1b1b;color:#eee;border-radius:8px;padding:8px 0}
+.cal button.on{background:#8b1e1e;color:#fff}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}
+input,select{padding:8px;border-radius:8px;border:1px solid #e6dccb}
+.muted{color:#7a7064;font-size:.9rem}
+.err{color:#b42318}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>가족 발전방</h1>
+<p class="muted">장부 family_v2 · 옛 주소는 인증서 만료</p>
+<p id="st">불러오는 중…</p>
+<nav class="tabs" id="tabs">
+<button data-t="schedule" class="on">주간 일정</button>
+<button data-t="young">작은아들</button>
+<button data-t="old">큰아들</button>
+<button data-t="pastry">파티션</button>
+<button data-t="wife">명단</button>
+</nav>
+<div id="view"></div>
+</div>
+<script>
+const SB="https://oexwktlmvygubaminixn.supabase.co";
+const KEY="sb_publishable_-tNTDrUX6Y_u8jBraOyCVQ_HcKniWns";
+const ID="family_v2";
+let payload=null, tab="schedule", picked=null;
+function esc(s){return String(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function today(){const d=new Date();const z=d.getTime()+9*3600*1000;const k=new Date(z);return k.toISOString().slice(0,10);}
+async function load(){
+  const r=await fetch(SB+"/rest/v1/odap_ledger?id=eq."+ID+"&select=payload,updated_at",{headers:{apikey:KEY,Authorization:"Bearer "+KEY}});
+  const rows=await r.json();
+  if(!rows||!rows[0]){document.getElementById("st").textContent="family_v2 없음";return;}
+  payload=rows[0].payload||{};
+  const q=(payload.questions||[]).length,n=(payload.evalNames||[]).length,s=(payload.schedules||[]).length,it=(payload.items||[]).length;
+  document.getElementById("st").textContent="질문 "+q+" · 명단 "+n+" · 일정 "+s+" · 오답 "+it;
+  if(!picked) picked=today();
+  render();
+}
+function itemsOf(owner){
+  return (payload.items||[]).filter(it=> (it.owner||"young")===(owner==="old"?"old":"young") || (!it.owner && owner==="young"));
+}
+function render(){
+  const v=document.getElementById("view");
+  if(tab==="schedule"){
+    const d=new Date((picked||today())+"T12:00:00");
+    const y=d.getFullYear(),m=d.getMonth();
+    const first=new Date(y,m,1).getDay(), last=new Date(y,m+1,0).getDate();
+    let cells="";
+    for(let i=0;i<first;i++) cells+="<span></span>";
+    const has=new Set((payload.schedules||[]).map(s=>s.date));
+    for(let i=1;i<=last;i++){
+      const ymd=y+"-"+String(m+1).padStart(2,"0")+"-"+String(i).padStart(2,"0");
+      cells+=`<button class="${ymd===picked?"on":""}" data-day="${ymd}">${i}${has.has(ymd)?"•":""}</button>`;
+    }
+    const rows=(payload.schedules||[]).filter(s=>s.date===picked);
+    v.innerHTML=`<div class="weather"><div class="muted">오늘 날씨</div>${esc(payload.weatherNote||"")}</div>
+      <div class="card"><strong>${y}년 ${m+1}월</strong>
+      <div class="cal"><b>일</b><b>월</b><b>화</b><b>수</b><b>목</b><b>금</b><b>토</b>${cells}</div>
+      <p>${picked}</p>
+      ${rows.map(s=>`<div class="card">${esc(s.time)} ${esc(s.text)} <button data-del="${esc(s.id)}">지우기</button></div>`).join("")||"<p class='muted'>이 날 일정 없음</p>"}
+      <div class="row"><input id="nt" type="time" value="00:00"><input id="nx" placeholder="내용"><button id="ns">저장</button></div>
+      </div>`;
+    v.querySelectorAll("[data-day]").forEach(b=>b.onclick=()=>{picked=b.dataset.day;render();});
+    const ns=v.querySelector("#ns");
+    if(ns) ns.onclick=()=>addSch(v.querySelector("#nt").value,v.querySelector("#nx").value);
+    v.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>delSch(b.dataset.del));
+  } else if(tab==="young"||tab==="old"){
+    const list=itemsOf(tab);
+    v.innerHTML=list.map(it=>`<div class="card"><strong>${esc(it.subject||"")} · ${esc(it.status||"")}</strong><div>${esc(it.problemText||it.title||it.id)}</div></div>`).join("")||"<p class='muted'>오답 없음</p>";
+  } else if(tab==="pastry"){
+    const rs=payload.recipes||[];
+    v.innerHTML=rs.map(r=>`<div class="card">${esc(r.title||"요리")}</div>`).join("")||"<p class='muted'>레시피 없음</p>";
+  } else {
+    const names=payload.evalNames||[];
+    v.innerHTML=`<p>${names.length}명</p>`+names.slice(0,40).map(n=>`<div class="card">${esc(n.name||n)}</div>`).join("")+(names.length>40?"<p class='muted'>이하 생략</p>":"");
+  }
+}
+async function save(next, allowShrink){
+  const prev=payload;
+  const counts={q:(prev.questions||[]).length,e:(prev.evalNames||[]).length,s:(prev.schedules||[]).length,i:(prev.items||[]).length};
+  const after={q:(next.questions||[]).length,e:(next.evalNames||[]).length,s:(next.schedules||[]).length,i:(next.items||[]).length};
+  if(!allowShrink && (after.q<counts.q||after.e<counts.e||after.s<counts.s||after.i<counts.i)){
+    alert("저장 취소: 장부 수가 줄었습니다"); return;
+  }
+  next.savedAt=new Date().toISOString();
+  const res=await fetch(SB+"/rest/v1/odap_ledger?id=eq."+ID,{
+    method:"PATCH",
+    headers:{apikey:KEY,Authorization:"Bearer "+KEY,"Content-Type":"application/json",Prefer:"return=minimal"},
+    body:JSON.stringify({payload:next,updated_at:new Date().toISOString()})
+  });
+  if(!res.ok){alert("저장 실패 "+res.status);return;}
+  payload=next; render();
+}
+function addSch(time,text){
+  if(!String(text||"").trim()){alert("내용을 적으세요");return;}
+  const next=Object.assign({},payload);
+  next.schedules=(payload.schedules||[]).concat([{id:"s-"+Date.now(),date:picked||today(),time:time||"00:00",text:text.trim()}]);
+  save(next);
+}
+function delSch(id){
+  const next=Object.assign({},payload);
+  next.schedules=(payload.schedules||[]).filter(s=>s.id!==id);
+  save(next,true);
+}
+document.getElementById("tabs").onclick=e=>{
+  const b=e.target.closest("button[data-t]"); if(!b) return;
+  tab=b.dataset.t;
+  [...document.getElementById("tabs").children].forEach(x=>x.classList.toggle("on",x===b));
+  render();
+};
+load().catch(e=>{document.getElementById("st").innerHTML="<span class='err'>"+esc(e)+"</span>";});
+</script>
+</body>
+</html>
